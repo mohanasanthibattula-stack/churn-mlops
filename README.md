@@ -20,7 +20,8 @@ pinned: false
 > A production-grade, low-latency machine learning system that trains, tracks, packages, tests, and serves customer churn predictions. Engineered from ground-up to deploy reliably under **free-tier constraints** (Render / Hugging Face Spaces: 512MB RAM, 0.1 CPU).
 
 🔗 **Live Interactive API Docs**: [https://churn-prediction-api.onrender.com/docs](https://churn-prediction-api.onrender.com/docs) *(Demo Link Placeholder)*  
-📄 **Model Governance Card**: [model_card.md](model_card.md)
+📄 **Model Governance Card**: [model_card.md](model_card.md)  
+🎯 **Interview Pitch & System Design Guide**: [INTERVIEW_GUIDE.md](INTERVIEW_GUIDE.md)
 
 ---
 
@@ -59,111 +60,171 @@ flowchart TD
 
 ---
 
-## Key Engineering Highlights
+## Dependencies & Decoupled Architecture
 
-- **512MB RAM Optimization**: Uses `python:3.10-slim` with multi-stage builds. Strips heavy development libraries (`mlflow`, `matplotlib`, `pytest`) out of runtime containers to keep idle RAM **under 90MB**.
-- **Zero Train-Serve Skew**: Combines `ColumnTransformer` (scaling & one-hot encoding) and the classifier inside a unified Scikit-Learn `Pipeline`. The API feeds raw input directly into `pipeline.predict_proba()`.
-- **Sub-100ms Inference SLA**: Achieves **< 3ms uncached latency** and **< 0.1ms LRU cached latency** on repeated inputs.
-- **Model Governance & Lineage**: Full [Model Card](model_card.md) documenting intended use, bias considerations, and quantitative evaluation.
-- **Continuous Monitoring & Drift Detection**: Real-time inference traffic is logged to `monitoring/prediction_logs.csv` and monitored via **Evidently AI** for distribution shift.
+To run smoothly on **free-tier instances (512MB RAM)** without triggering Linux kernel Out-Of-Memory (OOM 137) errors, dependencies are split into two decoupled requirement files:
 
----
+### 1. Production Runtime: `requirements.txt` (~110 MB Footprint)
+Contains only the strictly necessary wheels required for containerized inference:
 
-## Tech Stack
-
-| Component | Technology | Rationale |
+| Package | Version | Purpose in Production |
 | :--- | :--- | :--- |
-| **Language** | Python 3.10 | Pinned, stable C-extension wheels across all platforms |
-| **Machine Learning** | LightGBM / XGBoost, Scikit-Learn | Fast tree evaluations, sub-200KB artifact size |
-| **Experiment Tracking**| MLflow | Reproducible metric logging and model signature inference |
-| **Inference Framework**| FastAPI + Uvicorn | Async ASGI server, auto OpenAPI generation |
-| **Contract Validation**| Pydantic v2 | Sub-millisecond type safety and boundary checking |
-| **Containerization** | Docker (Multi-stage) | Multi-stage builder pattern; final image size **~265 MB** |
-| **Testing** | Pytest + HTTPX | Automated unit and integration endpoint coverage |
-| **CI/CD** | GitHub Actions | Automated linting, testing, and Docker validation under 2 minutes |
-| **Cloud Hosting** | Render / Hugging Face Spaces | Free tier production hosting with health probes |
-| **Monitoring** | Evidently AI | Statistical Kolmogorov-Smirnov data drift audit reports |
+| `fastapi` | `0.111.0` | High-performance asynchronous REST API framework |
+| `uvicorn[standard]` | `0.30.1` | Ultra-fast ASGI web server |
+| `pydantic` | `2.7.1` | Sub-millisecond Rust-backed request data validation |
+| `scikit-learn` | `1.4.2` | Preprocessing `ColumnTransformer` (scaling & one-hot encoding) |
+| `lightgbm` | `4.3.0` | Ultra-fast gradient boosting (<200KB model artifact, ~3ms inference) |
+| `pandas` & `numpy` | `2.2.2` / `1.26.4` | Vectorized feature transformations |
+| `joblib` | `1.4.2` | Fast pipeline model deserialization at startup |
+
+### 2. Development, Training & QA: `requirements-dev.txt`
+Extends `requirements.txt` with experimentation, plotting, testing, and drift auditing tools:
+
+| Package | Purpose in Development | Why Excluded from Production Docker? |
+| :--- | :--- | :--- |
+| `mlflow` | Experiment tracking, model signature logging | Heavy tracking server, adds ~250MB of unnecessary dependencies |
+| `matplotlib` & `seaborn` | Plotting ROC curves and Confusion Matrices | Visual libraries consume >150MB of RAM during import |
+| `pytest` & `httpx` | Test runner & asynchronous test client | Test fixtures are not needed during live production serving |
+| `evidently` | Automated distribution data drift auditing | Run as offline/scheduled audit jobs rather than in API runtime |
 
 ---
 
-## Project Structure
+## Step-by-Step Project Setup
 
-```text
-churn-mlops/
-├── data/
-│   ├── raw/                   # Raw customer records
-│   └── processed/             # Cached stratified splits (train.csv, test.csv)
-├── src/
-│   ├── __init__.py
-│   ├── config.py              # Central settings and environment variables
-│   ├── data_ingestion.py      # Raw loading & 6,000-row synthetic generator
-│   ├── preprocessing.py       # DRY: Shared vectorized transforms for train & serve
-│   ├── train.py               # MLflow training pipeline with early stopping
-│   ├── evaluate.py            # Offline classification report generator
-│   ├── predict.py             # Python SDK inference module
-│   └── drift_detection.py     # Evidently AI automated drift audit
-├── app/
-│   ├── __init__.py
-│   ├── main.py                # FastAPI endpoints, timing middleware, telemetry
-│   ├── schemas.py             # Pydantic v2 request/response validation schemas
-│   └── model_loader.py        # Singleton model manager with LRU cache
-├── tests/
-│   ├── __init__.py
-│   ├── test_preprocessing.py  # Unit tests for transformations & edge cases
-│   └── test_api.py            # Integration tests for API routes and 400 guards
-├── models/
-│   ├── model.pkl              # Serialized pipeline (< 200KB)
-│   └── metrics.json           # Logged test split evaluation metrics
-├── .github/workflows/
-│   └── ci-cd.yml              # Automated testing, Docker verification & deploy
-├── Dockerfile                 # Multi-stage slim production build (< 300MB)
-├── .dockerignore              # Aggressive exclusion of local caches & data
-├── .gitignore
-├── .env.example               # Template for environment variables
-├── requirements.txt           # Minimal runtime dependencies (prod)
-├── requirements-dev.txt       # Full training, MLflow, and test dependencies
-├── render.yaml                # Infrastructure as Code for Render deployment
-├── model_card.md              # Machine learning model documentation & ethics
-├── Makefile                   # Developer CLI automation commands
-└── README.md
-```
+Follow these exact steps to set up, train, test, and serve the project locally.
 
----
+### Step 1: Clone the Repository & Create Virtual Environment
 
-## Getting Started Locally
-
-### 1. Clone & Setup Virtual Environment
-```bash
-git clone https://github.com/your-username/churn-mlops.git
+**On Windows (PowerShell):**
+```powershell
+# 1. Navigate to project root
 cd churn-mlops
 
+# 2. Create isolated virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# 3. Activate virtual environment
+.\.venv\Scripts\Activate.ps1
 ```
 
-### 2. Install Development Dependencies
+**On macOS / Linux (Bash):**
 ```bash
+# 1. Navigate to project root
+cd churn-mlops
+
+# 2. Create isolated virtual environment
+python3 -m venv .venv
+
+# 3. Activate virtual environment
+source .venv/bin/activate
+```
+
+---
+
+### Step 2: Install Dependencies
+
+For local development, training, and testing, install the comprehensive development suite:
+```bash
+python -m pip install --upgrade pip
 pip install -r requirements-dev.txt
 ```
+*(If you only wish to test the lightweight production API without MLflow or plotting, run `pip install -r requirements.txt`).*
 
-### 3. Run Training & Offline Evaluation
+---
+
+### Step 3: Configure Environment Variables
+
+Copy the provided environment template:
+
+**Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+```
+
+**macOS / Linux:**
 ```bash
-# Trains model, evaluates test split, and logs to MLflow
-python -m src.train
+cp .env.example .env
+```
 
-# Verify classification report
+The default values in `.env` are configured out-of-the-box for local execution:
+- `CHURN_PROJECT_NAME="Customer Churn Prediction"`
+- `CHURN_API_PORT=8000`
+- `CHURN_DEBUG=False`
+
+---
+
+### Step 4: Run Data Ingestion & Model Training
+
+Execute the automated data pipeline to synthesize/load the Telco dataset, engineer loyalty features, fit the pipeline, and serialize the model:
+
+```bash
+# Step 4a: Run data ingestion & validation (generates 6,000 realistic rows if raw data is missing)
+python -m src.data_ingestion
+
+# Step 4b: Train the model, log metrics, and export models/model.pkl
+python -m src.train
+```
+
+**Expected Training Output:**
+```text
+[INFO] Loading raw data: data/raw/churn_data.csv (6,000 records)
+[INFO] Generating and caching new stratified dataset splits...
+[INFO] Using LightGBM classifier (ultra-low memory footprint)...
+[INFO] Fitting lean pipeline...
+[INFO] Model saved to models/model.pkl (Artifact Size: ~56 KB)
+[INFO] Evaluation Metrics: Accuracy: 75.83%, Precision: 67.74%, Recall: 59.72%, ROC-AUC: 0.8337
+```
+
+---
+
+### Step 5: Run Offline Evaluation
+
+Evaluate the saved production model against the held-out test split to inspect precision, recall, and confusion matrix:
+```bash
 python -m src.evaluate
 ```
 
-### 4. Run Pytest Test Suite
+---
+
+### Step 6: Run Automated Test Suites
+
+Run the complete 18-test unit and integration test suite:
 ```bash
 pytest -v tests/
 ```
+All tests should pass in under 4 seconds (`18 passed`).
 
-### 5. Launch Local FastAPI Server
+---
+
+### Step 7: Launch the FastAPI Production Server
+
+Start the local API service:
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-# Access docs at http://localhost:8000/docs
+```
+
+- **Interactive Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check Probe**: [http://localhost:8000/health](http://localhost:8000/health)
+- **Service Metrics Telemetry**: [http://localhost:8000/metrics](http://localhost:8000/metrics)
+
+---
+
+### Step 8: Launch the Interactive Streamlit Demo (Optional)
+
+To interactively test churn predictions using sliders and risk gauges:
+```bash
+streamlit run app/streamlit_app.py
+```
+Opens in your browser at `http://localhost:8501`.
+
+---
+
+### Step 9: Run Data Drift Auditing (Bonus Feature)
+
+Compare baseline training features against production prediction traffic:
+```bash
+python -m src.drift_detection
+# Generates an interactive visual report at monitoring/drift_report.html
 ```
 
 ---
@@ -173,10 +234,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 Build and run the multi-stage image locally enforcing the exact memory constraint of free cloud tiers:
 
 ```bash
-# 1. Build image
+# 1. Build image using multi-stage Dockerfile
 docker build -t churn-mlops:latest .
 
-# 2. Confirm image is under 400MB
+# 2. Confirm image size is under 400MB limit (~265MB)
 docker images churn-mlops:latest
 
 # 3. Run container constrained to 512MB RAM and 0.5 CPU
@@ -186,6 +247,9 @@ docker run -d \
   --memory="512m" \
   --cpus="0.5" \
   churn-mlops:latest
+
+# 4. Probe container health
+curl -f http://localhost:8000/health
 ```
 
 ---
@@ -224,7 +288,7 @@ curl -X POST http://localhost:8000/predict \
 ```json
 {
   "churn_prediction": 1,
-  "churn_probability": 0.8341,
+  "churn_probability": 0.843,
   "risk_level": "High",
   "churn_label": "Will Churn"
 }
@@ -256,6 +320,52 @@ curl -X POST http://localhost:8000/predict/batch \
       }
     ]
   }'
+```
+
+---
+
+## Project Structure Explanation
+
+```text
+churn-mlops/
+├── data/
+│   ├── raw/                   # Raw customer records (churn_data.csv)
+│   └── processed/             # Cached stratified splits (train.csv, test.csv)
+├── src/
+│   ├── __init__.py
+│   ├── config.py              # Central settings and environment variables
+│   ├── data_ingestion.py      # Raw loading & 6,000-row synthetic generator
+│   ├── preprocessing.py       # DRY: Shared vectorized transforms for train & serve
+│   ├── train.py               # LightGBM training pipeline with early stopping
+│   ├── evaluate.py            # Offline classification report generator
+│   ├── predict.py             # Python SDK inference module
+│   └── drift_detection.py     # Evidently AI automated drift audit
+├── app/
+│   ├── __init__.py
+│   ├── main.py                # FastAPI endpoints, timing middleware, telemetry
+│   ├── schemas.py             # Pydantic v2 request/response validation schemas
+│   ├── model_loader.py        # Singleton model manager with LRU cache
+│   └── streamlit_app.py       # Interactive UI for live recruiter testing
+├── tests/
+│   ├── __init__.py
+│   ├── test_preprocessing.py  # Unit tests for transformations & edge cases
+│   └── test_api.py            # Integration tests for API routes and 400 guards
+├── models/
+│   ├── model.pkl              # Serialized pipeline (< 200KB)
+│   └── metrics.json           # Logged test split evaluation metrics
+├── .github/workflows/
+│   └── ci-cd.yml              # Automated testing, Docker verification & deploy
+├── Dockerfile                 # Multi-stage slim production build (< 300MB)
+├── .dockerignore              # Aggressive exclusion of local caches & data
+├── .gitignore
+├── .env.example               # Template for environment variables
+├── requirements.txt           # Minimal runtime dependencies (prod)
+├── requirements-dev.txt       # Full training, MLflow, and test dependencies
+├── render.yaml                # Infrastructure as Code for Render deployment
+├── model_card.md              # Machine learning model documentation & ethics
+├── INTERVIEW_GUIDE.md         # Pitch guide & technical MLOps interview answers
+├── Makefile                   # Developer CLI automation commands
+└── README.md
 ```
 
 ---
