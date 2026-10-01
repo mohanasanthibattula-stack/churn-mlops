@@ -24,6 +24,7 @@ from app.schemas import (
     CustomerData,
     ErrorResponse,
     HealthResponse,
+    MetricsResponse,
     PredictionResponse,
 )
 from src.config import settings
@@ -33,6 +34,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger("churn-api")
 
 APP_START_TIME: float = time.time()
+METRICS: Dict[str, Any] = {
+    "total_requests": 0,
+    "total_predictions": 0,
+    "total_latency_ms": 0.0,
+}
 
 
 @asynccontextmanager
@@ -71,6 +77,10 @@ async def add_process_time_header(request: Request, call_next):
     start = time.perf_counter()
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start) * 1000.0
+
+    METRICS["total_requests"] += 1
+    METRICS["total_latency_ms"] += duration_ms
+
     response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
     return response
 
@@ -89,7 +99,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.get("/", tags=["General"])
 async def root() -> Dict[str, str]:
     """Root status endpoint returning minimal JSON."""
-    return {"service": settings.PROJECT_NAME, "status": "online", "docs": "/docs"}
+    return {
+        "service": settings.PROJECT_NAME,
+        "status": "online",
+        "docs": "/docs",
+        "documentation": "/docs",
+        "health_check": "/health",
+        "metrics": "/metrics",
+    }
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Observability"])
@@ -102,6 +119,21 @@ async def health() -> HealthResponse:
         app_version=settings.VERSION,
         timestamp=str(int(time.time())),
         uptime_seconds=round(time.time() - APP_START_TIME, 1),
+    )
+
+
+@app.get("/metrics", response_model=MetricsResponse, tags=["Observability"])
+async def get_metrics() -> MetricsResponse:
+    """Service observability endpoint returning request counts and average response latency."""
+    uptime = time.time() - APP_START_TIME
+    total_reqs = METRICS["total_requests"]
+    avg_latency = (METRICS["total_latency_ms"] / total_reqs) if total_reqs > 0 else 0.0
+
+    return MetricsResponse(
+        total_requests=total_reqs,
+        total_predictions=METRICS["total_predictions"],
+        avg_latency_ms=round(avg_latency, 2),
+        uptime_seconds=round(uptime, 2),
     )
 
 
@@ -133,6 +165,7 @@ async def predict(customer: CustomerData) -> PredictionResponse:
             payment_method=customer.payment_method,
             tech_support=customer.tech_support,
         )
+        METRICS["total_predictions"] += 1
         return PredictionResponse(**result)
     except Exception as e:
         logger.error(f"Inference error: {e}")
@@ -160,6 +193,7 @@ async def predict_batch(batch: CustomerBatchInput) -> BatchPredictionResponse:
     try:
         raw_items = [c.model_dump() for c in batch.customers]
         results = model_manager.predict_batch(raw_items)
+        METRICS["total_predictions"] += len(results)
         return BatchPredictionResponse(
             total_records=len(results),
             predictions=[PredictionResponse(**r) for r in results],

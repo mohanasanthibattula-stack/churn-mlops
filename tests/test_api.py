@@ -8,7 +8,7 @@ from typing import Any, Dict
 import pytest
 from fastapi.testclient import TestClient
 from sklearn.pipeline import Pipeline
-from xgboost import XGBClassifier
+from src.train import get_lean_classifier
 
 from app.main import app
 from app.model_loader import model_manager
@@ -32,7 +32,7 @@ def ensure_model_loaded_for_tests():
         pipeline = Pipeline(
             steps=[
                 ("preprocessor", build_preprocessor()),
-                ("classifier", XGBClassifier(n_estimators=5, max_depth=2, random_state=42)),
+                ("classifier", get_lean_classifier()),
             ]
         )
         pipeline.fit(X, y)
