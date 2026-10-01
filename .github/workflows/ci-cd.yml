@@ -1,0 +1,108 @@
+name: Continuous Integration & Continuous Deployment
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # JOB 1: Test Suite & Code Quality (< 60 seconds)
+  # Runs on every push and PR to validate preprocessing, models, and API schemas
+  # ============================================================================
+  test:
+    name: Run Unit & Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: "requirements-dev.txt"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Execute Pytest Suite
+        run: |
+          pytest -v tests/ --durations=10
+
+  # ============================================================================
+  # JOB 2: Build & Verify Production Container (< 60 seconds)
+  # SKIPPED on Pull Requests to save CI minutes; executes ONLY on merge to main
+  # ============================================================================
+  build-container:
+    name: Build & Validate Multi-Stage Docker Image
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        run: |
+          docker build -t churn-mlops:latest .
+
+      - name: Verify Image Size (< 400MB constraint)
+        run: |
+          IMAGE_BYTES=$(docker inspect churn-mlops:latest --format='{{.Size}}')
+          IMAGE_MB=$((IMAGE_BYTES / 1024 / 1024))
+          echo "Built Image Size: ${IMAGE_MB} MB"
+          if [ "$IMAGE_MB" -gt 400 ]; then
+            echo "ERROR: Image size (${IMAGE_MB}MB) exceeds 400MB free-tier limit!"
+            exit 1
+          fi
+
+      - name: Smoke Test Container Runtime & Health Check
+        run: |
+          # Run container with 512MB memory ceiling to simulate Render free tier
+          docker run -d --name test-churn-api -p 8000:8000 --memory="512m" churn-mlops:latest
+          sleep 4
+          # Verify container responds with healthy status
+          curl -f http://localhost:8000/health || (docker logs test-churn-api && exit 1)
+          docker rm -f test-churn-api
+
+  # ============================================================================
+  # JOB 3: Automated Zero-Touch Deployment to Render
+  # Triggers webhook on Render to pull and deploy verified container
+  # ============================================================================
+  deploy:
+    name: Deploy to Render Free Cloud
+    needs: build-container
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Trigger Render Deploy Hook
+        if: env.RENDER_URL != ''
+        env:
+          RENDER_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          echo "Dispatching deployment hook to Render..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$RENDER_URL")
+          if [ "$HTTP_STATUS" -eq 200 ] || [ "$HTTP_STATUS" -eq 201 ]; then
+            echo "Successfully triggered Render deployment (HTTP $HTTP_STATUS)."
+          else
+            echo "Render deploy hook returned status: $HTTP_STATUS"
+            exit 1
+          fi

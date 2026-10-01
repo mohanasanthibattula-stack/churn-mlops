@@ -1,0 +1,19 @@
+# Render Infrastructure-as-Code Blueprint
+# Automatically deploys the containerized FastAPI service on Render Free Tier (512MB RAM, 0.1 CPU)
+services:
+  - type: web
+    name: churn-prediction-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: CHURN_DEBUG
+        value: "false"
+      - key: PYTHONUNBUFFERED
+        value: "1"

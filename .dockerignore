@@ -1,0 +1,39 @@
+# Git and CI/CD
+.git/
+.gitignore
+.github/
+
+# Development virtual environments & caches
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Heavy MLflow experiment runs and artifact storage
+mlruns/
+mlartifacts/
+.trash/
+
+# Datasets (only trained models/model.pkl is needed for runtime serving)
+data/
+
+# Notebooks & exploratory analysis
+notebooks/
+
+# Test suites & coverage data
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local developer configs & docs
+.env*
+*.md
+LICENSE
+Makefile
+requirements-dev.txt
+monitoring/
+*.log
