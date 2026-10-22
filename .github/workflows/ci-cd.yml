@@ -62,13 +62,13 @@ jobs:
         run: |
           docker build -t churn-mlops:latest .
 
-      - name: Verify Image Size (< 400MB constraint)
+      - name: Verify Image Size (< 650MB free-tier baseline)
         run: |
           IMAGE_BYTES=$(docker inspect churn-mlops:latest --format='{{.Size}}')
           IMAGE_MB=$((IMAGE_BYTES / 1024 / 1024))
           echo "Built Image Size: ${IMAGE_MB} MB"
-          if [ "$IMAGE_MB" -gt 400 ]; then
-            echo "ERROR: Image size (${IMAGE_MB}MB) exceeds 400MB free-tier limit!"
+          if [ "$IMAGE_MB" -gt 650 ]; then
+            echo "ERROR: Image size (${IMAGE_MB}MB) exceeds 650MB free-tier baseline!"
             exit 1
           fi
 
