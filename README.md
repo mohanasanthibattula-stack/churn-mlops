@@ -10,7 +10,7 @@ pinned: false
 
 # Customer Churn Prediction — End-to-End MLOps Pipeline
 
-[![CI/CD Pipeline](https://github.com/your-username/churn-mlops/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/your-username/churn-mlops/actions)
+[![CI/CD Pipeline](https://github.com/mohanasanthibattula-stack/churn-mlops/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/mohanasanthibattula-stack/churn-mlops/actions)
 [![Python](https://img.shields.io/badge/Python-3.10-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111.0-009688.svg)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/Docker-Multi--stage-2496ED.svg)](https://www.docker.com/)
