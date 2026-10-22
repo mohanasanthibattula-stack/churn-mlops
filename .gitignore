@@ -78,4 +78,6 @@ models/*
 # Runtime monitoring logs & generated drift reports
 monitoring/
 *.html
+*.log
 prediction_logs.csv
+
