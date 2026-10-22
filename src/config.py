@@ -152,8 +152,10 @@ except ImportError:
 
     settings = PipelineSettings()
 
-# Ensure directories exist upon config load
-settings.DATA_RAW_DIR.mkdir(parents=True, exist_ok=True)
-settings.DATA_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-settings.MODELS_DIR.mkdir(parents=True, exist_ok=True)
-settings.MLRUNS_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure directories exist upon config load (silently ignore permission errors in restricted container environments)
+for _dir in (settings.DATA_RAW_DIR, settings.DATA_PROCESSED_DIR, settings.MODELS_DIR, settings.MLRUNS_DIR):
+    try:
+        _dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+

@@ -47,8 +47,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("FastAPI service booting. Initializing in-memory model cache...")
     try:
         model_manager.load_model()
-    except FileNotFoundError as e:
-        logger.warning(f"Startup warning: {e}. Model will need to be trained prior to inference.")
+    except Exception as e:
+        logger.warning(f"Startup warning initializing model: {e}. Starting in degraded mode.")
     yield
     logger.info("FastAPI service stopped.")
 

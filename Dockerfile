@@ -41,22 +41,24 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Create dedicated non-root application user for container security
+# Create dedicated non-root application user and application directories
 RUN groupadd -g 10001 appgroup && \
-    useradd -u 10001 -g appgroup -s /bin/sh -d /app appuser
+    useradd -u 10001 -g appgroup -s /bin/sh -d /app appuser && \
+    mkdir -p /app/data/raw /app/data/processed /app/models /app/mlruns && \
+    chown -R appuser:appgroup /app
 
-# Install pre-built wheels into standard site-packages and purge unneeded test suites
+# Install pre-built wheels into standard site-packages and remove cache
 COPY --from=builder /build/wheels /wheels
 RUN pip install --no-cache-dir /wheels/* && \
     rm -rf /wheels && \
     find /usr/local/lib/python3.10/site-packages -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/python3.10/site-packages -type d -name "test" -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/python3.10/site-packages -name "*.pyc" -delete
 
 # Copy application source code and trained model artifact with user ownership
 COPY --chown=appuser:appgroup src/ /app/src/
 COPY --chown=appuser:appgroup app/ /app/app/
 COPY --chown=appuser:appgroup models/ /app/models/
+RUN chown -R appuser:appgroup /app
 
 USER appuser
 EXPOSE 8000
