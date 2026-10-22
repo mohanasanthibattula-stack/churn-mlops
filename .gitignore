@@ -70,9 +70,10 @@ data/raw/*
 data/processed/*
 !data/processed/.gitkeep
 
-# Model weights & serializations (Trained dynamically or stored in registry)
+# Model weights & serializations (Track production lightweight model artifact)
 models/*
 !models/.gitkeep
+!models/model.pkl
 
 # Runtime monitoring logs & generated drift reports
 monitoring/

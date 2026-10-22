@@ -76,9 +76,9 @@ jobs:
         run: |
           # Run container with 512MB memory ceiling to simulate Render free tier
           docker run -d --name test-churn-api -p 8000:8000 --memory="512m" churn-mlops:latest
-          sleep 4
-          # Verify container responds with healthy status
-          curl -f http://localhost:8000/health || (docker logs test-churn-api && exit 1)
+          sleep 5
+          # Verify container responds with healthy status, retrying for container startup
+          curl -f --retry 6 --retry-delay 2 --retry-connrefused http://localhost:8000/health || (docker logs test-churn-api && exit 1)
           docker rm -f test-churn-api
 
   # ============================================================================
